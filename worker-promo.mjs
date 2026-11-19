@@ -1,0 +1,339 @@
+// worker-promo.mjs — 单店「推广花费」采集（运行在 ego 进程内）
+// 由 run.mjs 生成的 wrapper 通过 globalThis.__JOB 传入任务
+const fs = await import("node:fs/promises");
+
+const JOB = globalThis.__JOB || {};
+const t0 = Date.now();
+const logLines = [];
+const log = (...a) => {
+  const line = "[t=" + ((Date.now() - t0) / 1000).toFixed(1) + "s] " + a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ");
+  logLines.push(line);
+  console.log(line);
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const ROOT = (JOB.root || "D:/对账账单").replace(/\\/g, "/").replace(/\/$/, "");
+const SHOP_DIR = ROOT + "/" + JOB.shop;
+const PERIOD_DIR = SHOP_DIR + "/" + JOB.periodDir;
+const RESULT_PATH = JOB.resultPath || PERIOD_DIR + "/promo-result.json";
+
+function itoa2(n) { return String(n).padStart(2, "0"); }
+function dateUrl(d) { return d; }
+
+async function writeResult(obj) {
+  const out = { ...obj, shop: JOB.shop, from: JOB.from, to: JOB.to, elapsedSec: Number(((Date.now() - t0) / 1000).toFixed(1)) };
+  if (JOB.periodDir) await fs.mkdir(PERIOD_DIR, { recursive: true }).catch(() => {});
+  await fs.writeFile(RESULT_PATH, JSON.stringify(out, null, 1), "utf8").catch(() => {});
+  if (JOB.logPath) await fs.writeFile(JOB.logPath, logLines.join("\n"), "utf8").catch(() => {});
+  return out;
+}
+
+function promoUrl() {
+  return "https://yingxiao.pinduoduo.com/goods/report/promotion/overView?beginDate=" + JOB.from + "&endDate=" + JOB.to;
+}
+async function gotoPromo(pg) {
+  await pg.goto(promoUrl(), { timeout: 60000 }).catch(() => {});
+  await pg.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
+  await pg.waitForFunction(() => (document.body.innerText || "").includes("商品推广总览"), undefined, { timeout: 20000 }).catch(() => {});
+  await pg.waitForTimeout(300);
+}
+
+function readShopNameFromPage(pg) {
+  return pg.evaluate(() => {
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+    const mall = [...document.querySelectorAll("[class*='AccountNew_mallName']")].filter(vis).map(txt).filter(Boolean);
+    if (mall.length) return mall[0];
+    const nav = [...document.querySelectorAll("[class*='NavHeader_options']")].filter(vis).map(txt).filter(Boolean);
+    if (nav.length) return nav[0].replace(/^\d*\s*/, "").trim();
+    const t = txt(document.body);
+    const m = t.match(/营销书院\s+([^\s]{2,20})\s+报表/);
+    if (m) return m[1];
+    const m2 = t.match(/商家后台\s*[^\s]{0,10}\s*([^\s]{2,20})\s+报表/);
+    return m2 ? m2[1] : "";
+  }).catch(() => "");
+}
+
+async function discoverShops() {
+  const spaces = await listTaskSpaces();
+  const uniq = [];
+  for (const s of spaces) {
+    const pn = String(s.profileName || "");
+    if (!pn) continue;
+    if (uniq.some((u) => u.profileName === pn)) continue;
+    uniq.push({ profileName: pn, id: s.id });
+  }
+  const found = [];
+  for (const u of uniq) {
+    let t = null;
+    try {
+      const entry = (await listTaskSpaces()).find((s) => s.id === u.id);
+      if (!entry) continue;
+      t = entry.ownership === "user" ? await claimTaskSpace(entry.id)
+        : entry.ownership === "agentDelegatedToUser" ? await takeOverTaskSpace(entry.id)
+        : await taskSpace(entry.id);
+      const pg = await t.newPage();
+      await gotoPromo(pg);
+      const shop = await readShopNameFromPage(pg);
+      if (shop) found.push({ shop, profile: u.profileName });
+    } catch (e) {
+      log("discover_err", u.profileName + ": " + String((e && e.message) || e));
+    } finally {
+      try { if (t) await t.finish({ keep: [] }); } catch (e) {}
+    }
+  }
+  return found;
+}
+
+async function updateRegistry(found) {
+  const regPath = JOB.storesConfig || ROOT + "/_stores.json";
+  let reg = { version: 1, root: ROOT, stores: [] };
+  try { reg = JSON.parse(await fs.readFile(regPath, "utf8")); } catch (e) {}
+  if (!reg.stores) reg.stores = [];
+  if (!reg.root) reg.root = ROOT;
+  for (const f of found) {
+    let e = reg.stores.find((s) => s.shop === f.shop);
+    if (!e) { e = { shop: f.shop, profile: f.profile, enabled: true }; reg.stores.push(e); }
+    else { e.profile = f.profile; if (e.enabled === undefined) e.enabled = true; }
+  }
+  await fs.mkdir(ROOT, { recursive: true }).catch(() => {});
+  await fs.writeFile(regPath, JSON.stringify(reg, null, 2), "utf8");
+  return reg;
+}
+
+let task = null;
+let page = null;
+
+async function resolveSpace() {
+  const spaces = await listTaskSpaces();
+  const byProfile = spaces.find((s) => String(s.profileName || "") === String(JOB.profile || ""));
+  const byName = spaces.find((s) => String(s.name || "") === JOB.shop);
+  const entry = byProfile || byName;
+  if (!entry) throw new Error("space_not_found_for:" + (JOB.profile || JOB.shop));
+  task = entry.ownership === "user" ? await claimTaskSpace(entry.id)
+    : entry.ownership === "agentDelegatedToUser" ? await takeOverTaskSpace(entry.id)
+    : await taskSpace(entry.id);
+}
+
+async function openShopSpace() {
+  let shopName = "";
+  if (JOB.profile) {
+    try {
+      await resolveSpace();
+      page = await task.newPage();
+      await gotoPromo(page);
+      shopName = await readShopNameFromPage(page);
+      log("profile", JOB.profile + " -> " + (shopName || "(未识别)"));
+    } catch (e) {
+      log("profile_unusable", String((e && e.message) || e));
+      shopName = "";
+    }
+  }
+  if (!shopName || shopName !== JOB.shop) {
+    if (task) { try { await task.finish({ keep: [] }); } catch (e) {} task = null; page = null; }
+    log("discover_for", JOB.shop);
+    const found = await discoverShops();
+    const hit = found.find((f) => f.shop === JOB.shop);
+    if (hit) {
+      JOB.profile = hit.profile;
+      await updateRegistry([hit]);
+      await resolveSpace();
+      page = await task.newPage();
+      await gotoPromo(page);
+      shopName = await readShopNameFromPage(page);
+    }
+    if (!hit || shopName !== JOB.shop) throw new Error("shop_not_logged_in:" + JOB.shop);
+  }
+  if (!page) page = await task.newPage();
+  return shopName;
+}
+
+async function waitDates() {
+  await page.waitForFunction(({ begin, end }) => {
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const ins = [...document.querySelectorAll("input")].filter((e) => vis(e) && (e.placeholder || "").includes("开始日期"));
+    if (!ins.length) return false;
+    return ins.some((e) => e.value === begin) && [...document.querySelectorAll("input")].some((e) => (e.placeholder || "").includes("结束日期") && e.value === end);
+  }, { begin: JOB.beginText, end: JOB.endText }, { timeout: 15000 }).catch(() => {});
+  await sleep(300);
+}
+
+async function uncheckCompare() {
+  const state = await page.evaluate(() => {
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const boxes = [...document.querySelectorAll("input.anq-checkbox-input")].filter(vis);
+    return boxes.map((b) => ({ checked: b.checked })).slice(0, 4);
+  });
+  if (state.length >= 2 && state[1].checked) {
+    const ok = await page.evaluate(() => {
+      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const boxes = [...document.querySelectorAll("input.anq-checkbox-input")].filter(vis);
+      if (!boxes[1]) return false;
+      boxes[1].setAttribute("data-ego-uncheck", "1");
+      return true;
+    });
+    if (ok) {
+      await page.click('css=[data-ego-uncheck="1"]', { label: "uncheck compare" });
+      await sleep(600);
+    }
+  }
+  // 复核：指标卡不应再出现百分比（对比会带 %）
+  const still = await page.evaluate(() => {
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+    for (const el of document.querySelectorAll("div")) {
+      if (!vis(el)) continue;
+      const t = txt(el);
+      if (/成交花费/.test(t) && t.length < 90) {
+        if (/%/.test(t)) return true;
+      }
+    }
+    return false;
+  });
+  if (still) {
+    log("compare still on, retry");
+    const ok2 = await page.evaluate(() => {
+      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const boxes = [...document.querySelectorAll("input.anq-checkbox-input")].filter(vis);
+      if (boxes[1] && boxes[1].checked) { boxes[1].click(); return true; }
+      return false;
+    });
+    if (ok2) await sleep(600);
+  }
+}
+
+function parseMoney(text, label) {
+  const re = new RegExp(label + "\\s*(?:（元）|\\(元\\))?\\s*[:：]?\\s*[+\\-]?([0-9,]+(?:\\.[0-9]+)?)");
+  const m = text.match(re);
+  return m ? Number(m[1].replace(/,/g, "")) : null;
+}
+
+async function readSpend() {
+  const cards = await page.evaluate(() => {
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+    const out = [];
+    for (const el of document.querySelectorAll("div")) {
+      if (!vis(el)) continue;
+      const t = txt(el);
+      if (/成交花费|总花费/.test(t) && t.length < 90) out.push(t);
+    }
+    return out.slice(0, 12);
+  });
+  const spendText = cards.find((t) => /成交花费/.test(t)) || "";
+  const totalText = cards.find((t) => /总花费/.test(t)) || "";
+  return {
+    text: spendText,
+    spend: parseMoney(spendText, "成交花费"),
+    total: parseMoney(totalText, "总花费"),
+    cards: cards.slice(0, 4),
+  };
+}
+
+function fmt(n) {
+  if (n === null || n === undefined) return "未读到";
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function injectPromo(periodDir, block) {
+  const file = periodDir + "/账单信息.md";
+  let text = "";
+  try { text = await fs.readFile(file, "utf8"); } catch (e) {}
+  const re = /<!-- promo:start -->[\s\S]*?<!-- promo:end -->/;
+  if (re.test(text)) text = text.replace(re, block);
+  else text = (text ? text.replace(/\s*$/,"") + "\n\n" : "# 账单信息\n\n") + block;
+  await fs.writeFile(file, text, "utf8");
+}
+
+async function main() {
+  const shopName = await openShopSpace();
+  if (!page) page = await task.newPage();
+  const url = "https://yingxiao.pinduoduo.com/goods/report/promotion/overView?beginDate=" + dateUrl(JOB.from) + "&endDate=" + dateUrl(JOB.to);
+  await page.goto(url, { timeout: 60000 });
+  await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
+  await page.waitForFunction(() => (document.body.innerText || "").includes("商品推广总览"), undefined, { timeout: 20000 }).catch(() => {});
+  await waitDates();
+  log("page", url);
+
+  await uncheckCompare();
+  const spend = await readSpend();
+  log("spend", spend.text);
+  if (!spend.spend && spend.spend !== 0) throw new Error("spend_not_found:" + spend.text.slice(0, 120));
+
+  const periodDir = PERIOD_DIR;
+  await fs.mkdir(periodDir, { recursive: true }).catch(() => {});
+  const shot = await page.screenshot({ path: periodDir + "/" + JOB.shotName });
+  log("shot", shot);
+
+  const md = [
+    "# 推广花费 · " + JOB.shop + " · " + JOB.label,
+    "",
+    "| 项 | 值 |",
+    "|---|---|",
+    "| 店铺 | " + JOB.shop + " |",
+    "| 期间 | " + JOB.from + " ~ " + JOB.to + " |",
+    "| 成交花费（元） | " + fmt(spend.spend) + " |",
+    "| 总花费（元） | " + fmt(spend.total) + " |",
+    "| 截图 | `" + JOB.shotName + "` |",
+    "| 来源 | " + url + " |",
+    "| 记录时间 | " + new Date().toISOString() + " |",
+    "",
+    "> 口径：成交花费 = 推广总花费（用户确认）。截图前已关闭「对比时间」。",
+  ].join("\n");
+  await fs.writeFile(periodDir + "/推广花费.md", md, "utf8");
+
+  const block = [
+    "<!-- promo:start -->",
+    "## 推广花费",
+    "",
+    "| 项 | 值 |",
+    "|---|---|",
+    "| 成交花费（元） | " + fmt(spend.spend) + " |",
+    "| 总花费（元） | " + fmt(spend.total) + " |",
+    "| 截图 | `" + JOB.shotName + "` |",
+    "| 采集时间 | " + new Date().toISOString() + " |",
+    "<!-- promo:end -->",
+  ].join("\n");
+  await injectPromo(periodDir, block);
+
+  return {
+    status: spend.spend === null ? "warn" : "done",
+    shop: shopName,
+    spend: spend.spend,
+    total: spend.total,
+    shot: periodDir + "/" + JOB.shotName,
+    dateText: await page.evaluate(() => {
+      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const ins = [...document.querySelectorAll("input")].filter((e) => vis(e) && (e.placeholder || "").includes("开始日期"));
+      return ins.map((e) => e.value).slice(0, 1)[0] || "";
+    }),
+  };
+}
+
+async function doctor() {
+  const shopName = await openShopSpace();
+  if (!page) page = await task.newPage();
+  const url = "https://yingxiao.pinduoduo.com/goods/report/promotion/overView?beginDate=" + JOB.from + "&endDate=" + JOB.to;
+  await page.goto(url, { timeout: 60000 });
+  await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
+  await page.waitForFunction(() => (document.body.innerText || "").includes("商品推广总览"), undefined, { timeout: 20000 }).catch(() => {});
+  await waitDates();
+  await uncheckCompare();
+  const spend = await readSpend();
+  return { status: "doctor_ok", shop: shopName, spend: spend.spend, total: spend.total, text: spend.text.slice(0, 120) };
+}
+
+let result;
+try {
+  if (JOB.mode === "doctor") result = await doctor();
+  else result = await main();
+  await writeResult({ ok: true, ...result });
+} catch (e) {
+  const msg = String((e && e.message) || e);
+  log("ERROR", msg);
+  result = { status: "failed", error: msg };
+  await writeResult({ ok: false, ...result });
+} finally {
+  try { if (task) await task.finish({ keep: [] }); } catch (e) {}
+}
+console.log("WORKER_RESULT=" + JSON.stringify({ shop: JOB.shop, status: result && result.status, spend: result && result.spend, elapsed: ((Date.now() - t0) / 1000).toFixed(1) }));
