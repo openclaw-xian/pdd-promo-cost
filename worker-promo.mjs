@@ -203,9 +203,13 @@ async function uncheckCompare() {
 }
 
 function parseMoney(text, label) {
-  const re = new RegExp(label + "\\s*(?:（元）|\\(元\\))?\\s*[:：]?\\s*[+\\-]?([0-9,]+(?:\\.[0-9]+)?)");
+  const re = new RegExp(label + "\\s*(?:（元）|\\(元\\))?\\s*[:：]?\\s*[+\\-]?([0-9,]+(?:\\.[0-9]+)?)\\s*(万|亿)?");
   const m = text.match(re);
-  return m ? Number(m[1].replace(/,/g, "")) : null;
+  if (!m) return null;
+  let n = Number(m[1].replace(/,/g, ""));
+  if (m[2] === "万") n *= 10000;
+  else if (m[2] === "亿") n *= 100000000;
+  return n;
 }
 
 async function readSpend() {
@@ -363,6 +367,50 @@ async function collectFromMonthlyBill(shopName) {
   };
 }
 
+// 只读月账单某行，返回 {found, spend, raw}（用于总览值与账本核对）
+async function readMonthlyRowOnly(monthKey) {
+  await page.goto(FIN_URL, { timeout: 60000 });
+  await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
+  await page.waitForFunction(() => (document.body.innerText || "").includes("财务流水"), undefined, { timeout: 20000 }).catch(() => {});
+  await sleep(300);
+  await switchMonthlyTab();
+  let found = false;
+  for (let p = 0; p < 6 && !found; p++) {
+    for (let i = 0; i < 25 && !found; i++) {
+      found = await page.evaluate((k) => (document.body.innerText || "").includes(k), monthKey);
+      if (found) break;
+      const atBottom = await page.evaluate(() => window.innerHeight + window.scrollY >= document.body.scrollHeight - 8);
+      if (atBottom) break;
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await sleep(400);
+    }
+    if (found) break;
+    const nextMarked = await page.evaluate(() => {
+      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+      const cands = [...document.querySelectorAll("button, li, a, span")].filter((e) => vis(e) && !e.disabled && (txt(e) === ">" || /pagination-next/.test(String(e.className))));
+      if (!cands.length) return false;
+      cands[0].setAttribute("data-ego-nextpage2", "1");
+      return true;
+    });
+    if (!nextMarked) break;
+    await page.click('css=[data-ego-nextpage2="1"]', { label: "next page" }).catch(() => {});
+    await sleep(700);
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
+  return await page.evaluate((k) => {
+    const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+    const rows = [...document.querySelectorAll("table tr")];
+    const row = rows.find((r) => r.cells[0] && txt(r.cells[0]) === k);
+    if (!row) return { found: false };
+    row.scrollIntoView({ block: "center" });
+    const cells = [...row.cells].map((c) => txt(c));
+    const raw = cells[8] || "";
+    const num = parseFloat(raw.replace(/,/g, "").replace(/[^\d.-]/g, ""));
+    return { found: true, cells, raw, spend: Number.isFinite(num) ? num : null };
+  }, monthKey);
+}
+
 async function main() {
   const shopName = await openShopSpace();
   if (!page) page = await task.newPage();
@@ -410,6 +458,25 @@ async function main() {
   const shot = await page.screenshot({ path: periodDir + "/" + JOB.shotName });
   log("shot", shot);
 
+  const overviewSpend = spend.spend;
+  const dateText = await page.evaluate(() => {
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const ins = [...document.querySelectorAll("input")].filter((e) => vis(e) && (e.placeholder || "").includes("开始日期"));
+    return ins.map((e) => e.value).slice(0, 1)[0] || "";
+  });
+
+  // 与财务流水月账单核对（万显示会四舍五入，差异容忍 100 元）
+  const monthKey = JOB.from.slice(0, 7).replace("-", "/");
+  let billSpend = null;
+  if (isWholeMonth) {
+    const row = await readMonthlyRowOnly(monthKey);
+    if (row && row.found) billSpend = row.spend;
+    log("monthly_check", JSON.stringify({ monthKey, overviewSpend, billSpend }));
+  }
+  const diff = billSpend !== null && overviewSpend !== null ? billSpend - overviewSpend : null;
+  const monthlyMatched = diff !== null ? Math.abs(diff) <= 100 : null;
+  const finalSpend = billSpend !== null ? billSpend : overviewSpend;
+
   const md = [
     "# 推广花费 · " + JOB.shop + " · " + JOB.label,
     "",
@@ -417,13 +484,15 @@ async function main() {
     "|---|---|",
     "| 店铺 | " + JOB.shop + " |",
     "| 期间 | " + JOB.from + " ~ " + JOB.to + " |",
-    "| 成交花费（元） | " + fmt(spend.spend) + " |",
-    "| 总花费（元） | " + fmt(spend.total) + " |",
+    "| 成交花费（元） | " + fmt(finalSpend) + " |",
+    "| 总览显示（元） | " + fmt(overviewSpend) + (spend.text.includes("万") ? "（页面按万四舍五入）" : "") + " |",
+    "| 月账单本月支出（元） | " + fmt(billSpend) + " |",
+    "| 与月账单核对 | " + (monthlyMatched === null ? "未核对" : monthlyMatched ? "一致（差 " + fmt(diff) + " 元）" : "不一致（差 " + fmt(diff) + " 元）") + " |",
     "| 截图 | `" + JOB.shotName + "` |",
     "| 来源 | " + url + " |",
     "| 记录时间 | " + new Date().toISOString() + " |",
     "",
-    "> 口径：成交花费 = 推广总花费（用户确认）。截图前已关闭「对比时间」。",
+    "> 口径：成交花费 = 推广总花费。截图前已关闭「对比时间」；最终数值以财务流水月账单「本月支出」为准，总览按万显示会有几十元四舍五入。",
   ].join("\n");
   await fs.writeFile(periodDir + "/推广花费.md", md, "utf8");
 
@@ -433,8 +502,9 @@ async function main() {
     "",
     "| 项 | 值 |",
     "|---|---|",
-    "| 成交花费（元） | " + fmt(spend.spend) + " |",
-    "| 总花费（元） | " + fmt(spend.total) + " |",
+    "| 成交花费（元） | " + fmt(finalSpend) + " |",
+    "| 总览显示（元） | " + fmt(overviewSpend) + " |",
+    "| 月账单核对 | " + (monthlyMatched === null ? "未核对" : monthlyMatched ? "一致" : "不一致（差 " + fmt(diff) + " 元）") + " |",
     "| 截图 | `" + JOB.shotName + "` |",
     "| 采集时间 | " + new Date().toISOString() + " |",
     "<!-- promo:end -->",
@@ -442,16 +512,15 @@ async function main() {
   await injectPromo(periodDir, block);
 
   return {
-    status: spend.spend === null ? "warn" : "done",
+    status: finalSpend === null ? "warn" : monthlyMatched === false ? "warn" : "done",
     shop: shopName,
-    spend: spend.spend,
+    spend: finalSpend,
+    overviewSpend,
+    monthlyBill: billSpend,
+    monthlyMatched,
     total: spend.total,
     shot: periodDir + "/" + JOB.shotName,
-    dateText: await page.evaluate(() => {
-      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-      const ins = [...document.querySelectorAll("input")].filter((e) => vis(e) && (e.placeholder || "").includes("开始日期"));
-      return ins.map((e) => e.value).slice(0, 1)[0] || "";
-    }),
+    dateText,
   };
 }
 
