@@ -255,6 +255,12 @@ async function main() {
   await waitDates();
   log("page", url);
 
+  const noData = await page.evaluate(() => (document.body.innerText || "").includes("暂无数据"));
+  if (noData) {
+    log("no_data");
+    return { status: "no_data", note: "平台显示暂无数据（常见原因：超出最近180天保留期）" };
+  }
+
   await uncheckCompare();
   const spend = await readSpend();
   log("spend", spend.text);
@@ -318,6 +324,8 @@ async function doctor() {
   await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
   await page.waitForFunction(() => (document.body.innerText || "").includes("商品推广总览"), undefined, { timeout: 20000 }).catch(() => {});
   await waitDates();
+  const noData = await page.evaluate(() => (document.body.innerText || "").includes("暂无数据"));
+  if (noData) return { status: "doctor_no_data", shop: shopName, note: "平台显示暂无数据（可能超出180天保留期）" };
   await uncheckCompare();
   const spend = await readSpend();
   return { status: "doctor_ok", shop: shopName, spend: spend.spend, total: spend.total, text: spend.text.slice(0, 120) };

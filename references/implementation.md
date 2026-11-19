@@ -10,7 +10,7 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 打开推广�
 ## 调度器（run.mjs）
 
 1. 读 config（argv 必填）；解析 `root`、`ego`（配置 > `PDD_EGO_BROWSER` > `~/.local/share/ego` > PATH）、`worker`（默认同目录）。
-2. 预检：日期格式/倒挂/未来、root 存在、ego 存在、店铺来源（config `shops` 或 `<root>/_stores.json`）。
+2. 预检：日期格式/倒挂/未来、**180 天保留期（from < 今天-180 天直接拒绝 `range_out_of_retention`）**、root 存在、ego 存在、店铺来源（config `shops` 或 `<root>/_stores.json`）。
    - 缺项 → `PREFLIGHT=needs_user_input` + issues JSON，退出码 3。
    - `root` 在 C 盘默认拒绝（`allowC:true` 才放行）。
 3. 期间目录/标签：整月 `YYYY-MM` / `<M>月`；区间 `from_to` / `<M月D日-M月D日>`。
@@ -26,6 +26,7 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 打开推广�
    - 名字不符/找不到 → `discoverShops()`：对每个唯一 profile 打开推广页读店铺名；找到目标后写回 `_stores.json` 再重开。
    - 仍找不到 → `shop_not_logged_in`（提示用户登录，不是改映射）。
 2. **日期**：URL 参数 `beginDate/endDate`；`waitDates()` 等输入框回读等于期望值（`YYYY/MM/DD`）。
+   - 页面出现「暂无数据」→ 直接返回 `no_data`（常见原因：超出 180 天保留期），不读 0.00、不写文件。
 3. **关对比**：两个 `anq-checkbox-input`，第 2 个为「对比时间」；勾选则点掉；复核指标卡不含 `%`，必要时再点一次。
 4. **读数**：`readSpend()` 只扫长度为 <90 的卡片 div，分别解析「成交花费」「总花费」的第一个数值；读不到返回 null（状态 `warn`）。
 5. **截图**：`page.screenshot` 到 `<periodDir>/<shotName>`。

@@ -14,6 +14,7 @@
 - 主日期区间在右上角：两个 `input[placeholder="开始日期"/"结束日期"]`，value 形如 `2026/10/01`，readonly。
 - **URL 参数 `beginDate`/`endDate` 可直接设定区间**，页面加载后输入框同步（2026-03 远月份实测 OK）。
 - 页面还有第二组日期：数据概览里的「对比时间」区间（如 `2026/08/31 ~ 2026/09/30`），**不是主区间**，取数/截图都不能用它。
+- **保留期 180 天**：日历里早于「今天 − 180 天」的日期会置灰不可选；快捷项最大「过去 180 日」；「报表下载工具」页同样禁用更早日期。超出保留期时总览页显示「暂无数据」，指标卡显示 0.00（是占位，不是真实花费）。
 - 日期选择器本体是 `anq-picker`（Ant Design 风格）：
   - 双月面板；每面板按钮：`anq-picker-header-super-prev-btn`（上一年）/`prev-btn`（上一月）/`year-btn` / `month-btn` / `next-btn` / `super-next-btn`；
   - 日期格：`.anq-picker-cell`，本月格带 `anq-picker-cell-in-view`（非本月不带）；

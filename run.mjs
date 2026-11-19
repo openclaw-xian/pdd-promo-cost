@@ -55,10 +55,16 @@ const from = String(CFG.from || "");
 const to = String(CFG.to || "");
 const issues = [];
 const addIssue = (code, q, extra = {}) => issues.push({ code, question: q, ...extra });
-const todayIso = new Date().toISOString().slice(0, 10);
+const todayIso = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+const retentionStart = (() => {
+  const d = new Date(todayIso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 180);
+  return d.toISOString().slice(0, 10);
+})();
 if (!/^20\d\d-\d\d-\d\d$/.test(from) || !/^20\d\d-\d\d-\d\d$/.test(to)) addIssue("range_invalid", "from/to 必须是 YYYY-MM-DD，当前 from=" + from + " to=" + to, { from, to });
 else if (from > to) addIssue("range_reversed", "起始日 " + from + " 晚于结束日 " + to, { from, to });
 else if (to > todayIso) addIssue("range_in_future", "结束日 " + to + " 在未来（今天 " + todayIso + "）", { to, today: todayIso });
+else if (from < retentionStart) addIssue("range_out_of_retention", "推广报表只保留最近 180 天，最早可查 " + retentionStart + "；" + from + " 已超出保留期，平台无法提供数据（不是没有花费）。", { from, retentionStart, today: todayIso });
 if (!existsSync(ROOT)) addIssue("root_missing", "账单根目录不存在：" + ROOT + "。是否创建？（确认后加 autoCreateRoot:true）", { root: ROOT, action: "create_root" });
 if (EGO !== "ego-browser" && !existsSync(EGO)) addIssue("ego_not_found", "ego-browser 不可用：" + EGO, { ego: EGO });
 
