@@ -245,9 +245,147 @@ async function injectPromo(periodDir, block) {
   await fs.writeFile(file, text, "utf8");
 }
 
+const FIN_URL = "https://yingxiao.pinduoduo.com/mains/account/report";
+
+async function switchMonthlyTab() {
+  const ok = await page.evaluate(() => {
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+    const hits = [...document.querySelectorAll("div,span,li,a,button")].filter((e) => vis(e) && txt(e) === "月账单");
+    if (!hits.length) return false;
+    hits[0].setAttribute("data-ego-monthtab", "1");
+    return true;
+  });
+  if (!ok) throw new Error("monthly_tab_not_found");
+  await page.click('css=[data-ego-monthtab="1"]', { label: "monthly bills tab" });
+  await sleep(800);
+}
+
+// 老月份走「财务流水 → 月账单」：本月支出 = 推广花费
+async function collectFromMonthlyBill(shopName) {
+  const monthKey = JOB.from.slice(0, 7).replace("-", "/");
+  await fs.mkdir(PERIOD_DIR, { recursive: true }).catch(() => {});
+  await page.goto(FIN_URL, { timeout: 60000 });
+  await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
+  await page.waitForFunction(() => (document.body.innerText || "").includes("财务流水"), undefined, { timeout: 20000 }).catch(() => {});
+  await sleep(300);
+  await switchMonthlyTab();
+
+  let found = false;
+  for (let p = 0; p < 6 && !found; p++) {
+    for (let i = 0; i < 25 && !found; i++) {
+      found = await page.evaluate((k) => (document.body.innerText || "").includes(k), monthKey);
+      if (found) break;
+      const atBottom = await page.evaluate(() => window.innerHeight + window.scrollY >= document.body.scrollHeight - 8);
+      if (atBottom) break;
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await sleep(450);
+    }
+    if (found) break;
+    // 翻页：找可用的「>」下一页按钮
+    const nextMarked = await page.evaluate(() => {
+      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+      const cands = [...document.querySelectorAll("button, li, a, span")].filter((e) => {
+        if (!vis(e)) return false;
+        if (e.disabled || e.getAttribute("aria-disabled") === "true") return false;
+        const t = txt(e);
+        const cls = String(e.className || "");
+        return t === ">" || /pagination-next/.test(cls);
+      });
+      if (!cands.length) return false;
+      cands[0].setAttribute("data-ego-nextpage", "1");
+      return true;
+    });
+    if (!nextMarked) break;
+    await page.click('css=[data-ego-nextpage="1"]', { label: "next page" }).catch(() => {});
+    await sleep(700);
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
+  const rowInfo = await page.evaluate((k) => {
+    const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
+    const rows = [...document.querySelectorAll("table tr")];
+    const row = rows.find((r) => r.cells[0] && txt(r.cells[0]) === k);
+    if (!row) return { found: false };
+    row.scrollIntoView({ block: "center" });
+    const cells = [...row.cells].map((c) => txt(c));
+    const raw = cells[8] || "";
+    const num = parseFloat(raw.replace(/,/g, "").replace(/[^\d.-]/g, ""));
+    return { found: true, cells, raw, spend: Number.isFinite(num) ? num : null };
+  }, monthKey);
+  log("monthly", JSON.stringify(rowInfo));
+  if (!rowInfo.found) throw new Error("monthly_row_not_found:" + monthKey);
+  await sleep(300);
+  const shot = await page.screenshot({ path: PERIOD_DIR + "/" + JOB.shotName });
+  log("shot", shot);
+
+  const spend = rowInfo.spend;
+  const md = [
+    "# 推广花费 · " + JOB.shop + " · " + JOB.label,
+    "",
+    "| 项 | 值 |",
+    "|---|---|",
+    "| 店铺 | " + JOB.shop + " |",
+    "| 期间 | " + JOB.from + " ~ " + JOB.to + " |",
+    "| 成交花费（元） | " + fmt(spend) + "（取自财务流水·月账单「本月支出」） |",
+    "| 总花费（元） | " + fmt(spend) + "（月账单口径） |",
+    "| 截图 | `" + JOB.shotName + "` |",
+    "| 来源 | 财务流水·月账单（本月支出） | " + FIN_URL + " |",
+    "| 记录时间 | " + new Date().toISOString() + " |",
+    "",
+    "> 口径：成交花费 = 推广总花费。该月份超出商品推广总览的 180 天保留期，改用「财务流水 → 月账单」的本月支出（与总览近期数据同口径）。",
+  ].join("\n");
+  await fs.writeFile(PERIOD_DIR + "/推广花费.md", md, "utf8");
+
+  const block = [
+    "<!-- promo:start -->",
+    "## 推广花费",
+    "",
+    "| 项 | 值 |",
+    "|---|---|",
+    "| 成交花费（元） | " + fmt(spend) + " |",
+    "| 总花费（元） | " + fmt(spend) + " |",
+    "| 截图 | `" + JOB.shotName + "` |",
+    "| 来源 | 财务流水·月账单（本月支出） |",
+    "| 采集时间 | " + new Date().toISOString() + " |",
+    "<!-- promo:end -->",
+  ].join("\n");
+  await injectPromo(PERIOD_DIR, block);
+
+  return {
+    status: spend === null ? "warn" : "done",
+    shop: shopName,
+    spend,
+    total: spend,
+    source: "monthly_bill",
+    monthKey,
+    shot: PERIOD_DIR + "/" + JOB.shotName,
+  };
+}
+
 async function main() {
   const shopName = await openShopSpace();
   if (!page) page = await task.newPage();
+
+  const todayIso = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  const retentionStart = (() => {
+    const d = new Date(todayIso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 180);
+    return d.toISOString().slice(0, 10);
+  })();
+  const fparts = JOB.from.split("-").map(Number);
+  const tparts = JOB.to.split("-").map(Number);
+  const monthEnd = new Date(tparts[0], tparts[1], 0).getDate();
+  const isWholeMonth = fparts[1] === tparts[1] && fparts[2] === 1 && tparts[2] === monthEnd;
+
+  if (JOB.from < retentionStart) {
+    log("old_range", JOB.from + " < " + retentionStart + " → 财务流水·月账单");
+    if (!isWholeMonth) {
+      return { status: "unsupported_old_range", note: "超出商品推广总览 180 天保留期的区间，只能读整月的财务流水月账单" };
+    }
+    return await collectFromMonthlyBill(shopName);
+  }
+
   const url = "https://yingxiao.pinduoduo.com/goods/report/promotion/overView?beginDate=" + dateUrl(JOB.from) + "&endDate=" + dateUrl(JOB.to);
   await page.goto(url, { timeout: 60000 });
   await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
@@ -258,7 +396,8 @@ async function main() {
   const noData = await page.evaluate(() => (document.body.innerText || "").includes("暂无数据"));
   if (noData) {
     log("no_data");
-    return { status: "no_data", note: "平台显示暂无数据（常见原因：超出最近180天保留期）" };
+    if (isWholeMonth) return await collectFromMonthlyBill(shopName);
+    return { status: "no_data", note: "平台显示暂无数据（可能超出最近180天保留期）" };
   }
 
   await uncheckCompare();
