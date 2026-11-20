@@ -4,7 +4,7 @@
 
 ```
 run.mjs          普通 Node 调度器：读配置 → 预检 → 生成 job → spawn ego worker（并发池）
-worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 打开推广页 → 关对比 → 读数 → 截图 → 写文件
+worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 选数据源（总览/月账单）→ 关对比 → 读数 → 核对 → 截图 → 写文件
 ```
 
 ## 调度器（run.mjs）
@@ -38,10 +38,10 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 打开推广�
 5. **读数（总览）**：`readSpend()` 只扫长度为 <90 的卡片 div，分别解析「成交花费」「总花费」的第一个数值；`parseMoney()` 处理 `万/亿` 单位换算（例 `2.21 万` = 22,100）；读不到返回 null（状态 `warn`）。
 6. **月账单核对**：整月采集完总览后，用 `readMonthlyRowOnly()` 读同月月账单「本月支出」；最终 `spend` 取月账单精确值，`overviewSpend` 保留页面显示值，差异 ≤100 元视为一致（万显示四舍五入），否则状态 `warn`。
 7. **截图**：`page.screenshot` 到 `<periodDir>/<shotName>`（截图在核对前完成，是总览页）。
-7. **写文件**：
-   - `推广花费.md`（店铺/期间/成交花费/总花费/截图/来源 URL/时间 + 口径说明）
+8. **写文件**：
+   - `推广花费.md`（店铺/期间/成交花费（月账单精确值）/总览显示/月账单核对/截图/来源 URL/时间 + 口径说明）
    - `账单信息.md`：用 `<!-- promo:start -->…<!-- promo:end -->` 块注入/替换（不存在则创建带标题的文件）
-8. 结果 JSON：`{ ok, status: done|warn|no_data|unsupported_old_range|failed, spend, total, source, shot, error? }`。
+9. 结果 JSON：`{ ok, status: done|warn|no_data|unsupported_old_range|failed, spend, overviewSpend, monthlyBill, monthlyMatched, total, source, shot, error? }`。
 
 ## 与 pdd-bills 的协作
 
@@ -55,8 +55,10 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 打开推广�
 | 页面 URL / 参数名 | `worker-promo.mjs` 的 `promoUrl()` |
 | 店铺名元素 | `readShopNameFromPage()` 的 `AccountNew_mallName` / `NavHeader_options` |
 | 对比复选框顺序/结构 | `uncheckCompare()` 的 `input.anq-checkbox-input` 下标 |
-| 指标卡文案/数值格式 | `readSpend()` 与 `parseMoney()` |
+| 指标卡文案/数值格式 | `readSpend()` 与 `parseMoney()`（含 万/亿 单位） |
 | 日期控件回读 | `waitDates()` 的 placeholder/格式 |
+| 月账单页面/列顺序 | `FIN_URL`、`switchMonthlyTab()`、`readMonthlyRowOnly()`（本月支出=第 9 列） |
+| 月账单翻页 | `readMonthlyRowOnly()` / `collectFromMonthlyBill()` 里的 `>` 下一页逻辑 |
 | 截图/文件命名 | `run.mjs` 的 `periodDir`/`label`/`shotName` 与 worker 写文件段 |
 
 改完先单店单月跑一遍，核对页面「成交花费」与 `推广花费.md` 一致，再扩多店。
