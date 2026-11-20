@@ -8,9 +8,10 @@ description: 拼多多多店铺「推广花费」采集（多多招财 · 商品
 > 本 skill 不含本机路径、账号、店铺名；真实店铺清单在用户数据目录。
 >
 > 实现细节 / 页面契约 / 测试见 `references/`：
-> - `references/dom-contract.md` — 推广页 URL、店铺名元素、对比开关、指标卡解析、日期输入
-> - `references/implementation.md` — 调度器 + worker 流程、日期设置、口径、写入规则、维护指南
-> - `references/testing.md` — 实测数字与结果
+> - `references/dom-contract.md` — 推广页 URL、店铺名元素、对比开关、指标卡解析、日期输入、月账单表格
+> - `references/implementation.md` — 调度器 + worker 流程、数据源选择、核对、写入规则、维护指南
+> - `references/testing.md` — 实测数字、交叉核对表
+> - `references/pitfalls.md` — 用什么方法、怎么用、踩过的坑与排障对照表
 
 ## 前置条件
 
@@ -92,6 +93,8 @@ node <skill目录>/run.mjs <config.json>
 | `spend_not_found` | 页面改版或对比未关闭；看 `_runs/.../logs/<店>.log`，按 references 调整解析 |
 | 日期不对 | URL 参数被忽略时，改用 anq 日期控件（结构见 dom-contract） |
 | 页面停在登录页 | 手动登录该 profile 后重跑 |
+
+更完整的「现象 → 根因 → 修法」见 `references/pitfalls.md`（含万单位、180 天、月账单翻页、对比开关等坑）。
 
 ## 版本
 
