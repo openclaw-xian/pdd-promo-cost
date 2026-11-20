@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-20
+
+- **条件不满足时自动兜底**：非 C 盘根目录缺失自动创建（`ROOT_AUTO_CREATED`）；没有店铺清单时自动扫描 ego profiles 生成 `_stores.json`（`STORES_DISCOVERED`），不再直接要求用户手填。
+- **把问题交回给用户**：店铺未登录/找不到时 worker 返回 `needs`（含 `question` + `availableProfiles`），runner 打印 `NEEDS=needs_user_action` 并以退出码 **4** 结束；`PREFLIGHT=needs_user_input` 仍是退出码 3。
+- 新增 `discover` worker 模式；ego 不可用/日期非法/C 盘仍走 `PREFLIGHT` 并给出可执行指引。
+- SKILL 描述去掉具体盘符；README/implementation/acceptance/pitfalls 同步“自动兜底 + needs”流程。
+- 验收：临时 root 自动创建 + 自动发现 3 店并跑通 2026-10；不存在店铺 → `NEEDS` + exit 4。
+
 ## 0.2.4 — 2026-11-20
 
 - 补齐交付件：`examples/doctor-config.example.json`、`examples/stores.example.json`、`references/acceptance.md`（交付 DoD + 陌生人走查 + 状态/退出码表）。

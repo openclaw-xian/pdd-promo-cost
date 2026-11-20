@@ -541,13 +541,25 @@ async function doctor() {
 
 let result;
 try {
-  if (JOB.mode === "doctor") result = await doctor();
+  if (JOB.mode === "discover") {
+    const found = await discoverShops();
+    result = { status: "discovered", shops: found };
+  } else if (JOB.mode === "doctor") result = await doctor();
   else result = await main();
   await writeResult({ ok: true, ...result });
 } catch (e) {
   const msg = String((e && e.message) || e);
   log("ERROR", msg);
   result = { status: "failed", error: msg };
+  if (msg.includes("shop_not_logged_in") || msg.includes("space_not_found_for")) {
+    let profiles = [];
+    try { profiles = [...new Set((await listTaskSpaces()).map((s) => String(s.profileName || "")).filter(Boolean))]; } catch (e2) {}
+    result.needs = {
+      code: "shop_not_logged_in",
+      question: "在 ego 的各个 profile 里没找到店铺「" + JOB.shop + "」。请登录该店铺（或把店铺加到 ego）后重跑。",
+      availableProfiles: profiles,
+    };
+  }
   await writeResult({ ok: false, ...result });
 } finally {
   try { if (task) await task.finish({ keep: [] }); } catch (e) {}

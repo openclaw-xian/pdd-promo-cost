@@ -28,7 +28,7 @@ cp -r . ~/.agents/skills/pdd-promo-cost
 
 - Windows + ego-browser（各店 profile 已登录）
 - Node.js
-- 账单根目录（默认 `D:/对账账单`，非 C 盘；配置 `root` 可改）
+- 账单根目录（默认 `D:/对账账单`，非 C 盘；不存在会自动创建，配置 `root` 可改）
 
 ## 用法
 
@@ -42,7 +42,13 @@ node <skill目录>/run.mjs <config.json>
 { "from": "2026-10-01", "to": "2026-10-31", "concurrency": 2 }
 ```
 
-店铺来源：配置 `shops`，或 `<root>/_stores.json`（可只写店铺名）。
+店铺来源：配置 `shops`，或 `<root>/_stores.json`；**两者都可以不给**——首次运行会自动扫描 ego profiles 生成 `_stores.json`。
+
+遇到条件不满足时：
+- 根目录不存在（非 C 盘）→ 自动创建
+- 没有店铺清单 → 自动发现店铺
+- 店铺没登录/找不到 → 输出 `NEEDS=needs_user_action`（退出码 4）和要转给用户的问题
+- 其它配置问题 → `PREFLIGHT=needs_user_input`（退出码 3）
 
 示例：`examples/promo-config.example.json`、`examples/doctor-config.example.json`、`examples/stores.example.json`；交付验收/陌生人走查见 [references/acceptance.md](references/acceptance.md)。
 

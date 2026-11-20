@@ -59,30 +59,57 @@ const todayIso = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 1
 if (!/^20\d\d-\d\d-\d\d$/.test(from) || !/^20\d\d-\d\d-\d\d$/.test(to)) addIssue("range_invalid", "from/to 必须是 YYYY-MM-DD，当前 from=" + from + " to=" + to, { from, to });
 else if (from > to) addIssue("range_reversed", "起始日 " + from + " 晚于结束日 " + to, { from, to });
 else if (to > todayIso) addIssue("range_in_future", "结束日 " + to + " 在未来（今天 " + todayIso + "）", { to, today: todayIso });
-if (!existsSync(ROOT)) addIssue("root_missing", "账单根目录不存在：" + ROOT + "。是否创建？（确认后加 autoCreateRoot:true）", { root: ROOT, action: "create_root" });
-if (EGO !== "ego-browser" && !existsSync(EGO)) addIssue("ego_not_found", "ego-browser 不可用：" + EGO, { ego: EGO });
 
+// 根目录：非 C 盘缺省自动创建；C 盘仍默认拒绝（可 allowC:true 放行）
+const rootOnC = /^[A-Za-z]:/.test(ROOT) && ROOT.slice(0, 1).toUpperCase() === "C" && !CFG.allowC;
+if (!existsSync(ROOT)) {
+  if (rootOnC) {
+    addIssue("root_on_c_drive", "账单根目录在 C 盘：" + ROOT + "。请把 root 改到其他盘，或显式 allowC:true。", { root: ROOT, action: "change_root" });
+  } else {
+    try {
+      await fs.mkdir(ROOT, { recursive: true });
+      console.log("ROOT_AUTO_CREATED=" + ROOT);
+    } catch (e) {
+      addIssue("root_create_failed", "无法创建根目录：" + ROOT + "（" + String((e && e.message) || e) + "）", { root: ROOT, action: "create_root" });
+    }
+  }
+}
+if (EGO !== "ego-browser" && !existsSync(EGO)) addIssue("ego_not_found", "ego-browser 不可用：" + EGO + "。请安装 ego-browser，或在 config 里用 ego 指定路径。", { ego: EGO, action: "install_or_config_ego" });
+
+const egoUsable = EGO === "ego-browser" ? true : existsSync(EGO);
 let STORES = null;
 let stores = [];
+let storesFromConfig = false;
 if (CFG.shops && CFG.shops.length) {
   stores = CFG.shops.map((s) => (typeof s === "string" ? { shop: s } : s)).filter((s) => s && s.shop);
+  storesFromConfig = true;
 } else if (existsSync(STORES_CFG)) {
   try {
     STORES = JSON.parse(await fs.readFile(STORES_CFG, "utf8"));
     const all = (STORES.stores || []).filter((s) => s.enabled !== false && s.shop);
     const only = CFG.only && CFG.only.length ? CFG.only : null;
     stores = only ? all.filter((s) => only.includes(s.shop)) : all;
+    storesFromConfig = true;
   } catch (e) {
-    addIssue("stores_config_invalid", "店铺清单不是合法 JSON：" + STORES_CFG, { path: STORES_CFG, error: String(e && e.message || e) });
+    storesFromConfig = true;
+    addIssue("stores_config_invalid", "店铺清单不是合法 JSON：" + STORES_CFG + "。修好该文件后重跑（不会覆盖它）。", { path: STORES_CFG, error: String((e && e.message) || e), action: "fix_stores_config" });
   }
-} else {
-  addIssue("stores_config_missing", "没有店铺清单，也没有 config.shops：" + STORES_CFG, { path: STORES_CFG });
 }
-if (!stores.length) addIssue("no_store_selected", "没有可跑的店（shops/only 为空或都不匹配）", {});
 
-if (CFG.autoCreateRoot && !existsSync(ROOT) && !(/^[A-Za-z]:/.test(ROOT) && ROOT.slice(0, 1).toUpperCase() === "C" && !CFG.allowC)) {
-  await fs.mkdir(ROOT, { recursive: true }).catch(() => {});
-  for (let i = issues.length - 1; i >= 0; i--) if (issues[i].code === "root_missing" && existsSync(ROOT)) issues.splice(i, 1);
+// 没有可跑店铺时，自动扫描 ego 已登录店铺并生成清单（用户/agent 不用手填映射）
+if (!stores.length && !storesFromConfig && egoUsable && !issues.some((i) => i.code === "ego_not_found")) {
+  console.log("STORES_DISCOVERING=1");
+  const disc = await runDiscovery();
+  if (disc && disc.ok && disc.shops && disc.shops.length) {
+    await saveStores(disc.shops);
+    stores = disc.shops.map((s) => ({ shop: s.shop, profile: s.profile }));
+    console.log("STORES_DISCOVERED=" + stores.length + " -> " + STORES_CFG);
+  } else {
+    addIssue("stores_not_logged_in", "ego 里没有可用的已登录店铺：请先登录至少一家店（或手动提供 " + STORES_CFG + "）后重跑。", { availableProfiles: (disc && disc.shops) || [], action: "login_shop" });
+  }
+}
+if (!stores.length && !issues.some((i) => ["stores_not_logged_in", "stores_config_invalid", "no_store_selected"].includes(i.code))) {
+  addIssue("no_store_selected", "没有可跑的店（shops/only 为空或都不匹配）", { action: "check_shops" });
 }
 
 if (issues.length) {
@@ -148,6 +175,35 @@ async function runOne(store, i, mode) {
   return { shop: store.shop, result, wallSec: Number(((Date.now() - started) / 1000).toFixed(1)) };
 }
 
+// 扫描 ego profiles，自动生成/补齐 _stores.json
+async function runDiscovery() {
+  const resultPath = path.join(os.tmpdir(), "pdd-promo-discover-" + RUN_ID + ".json");
+  const dir = RUNTIME + "/" + RUN_ID + "-discover";
+  await fs.mkdir(dir, { recursive: true }).catch(() => {});
+  const job = { mode: "discover", root: ROOT, storesConfig: STORES_CFG, resultPath };
+  const wrapper = dir + "/discover.mjs";
+  await fs.writeFile(wrapper, "globalThis.__JOB = " + JSON.stringify(job) + ";\nawait import('file:///" + WORKER + "');\n", "utf8");
+  const child = spawn(EGO, ["nodejs", "-e", "await import('file:///" + wrapper + "')"], { stdio: "ignore", windowsHide: true });
+  const timeout = setTimeout(() => { try { child.kill(); } catch (e) {} }, Number(CFG.jobTimeoutSec || 120) * 1000);
+  await new Promise((res) => child.on("exit", res));
+  clearTimeout(timeout);
+  try { return JSON.parse(await fs.readFile(resultPath, "utf8")); } catch (e) { return { ok: false, shops: [] }; }
+}
+
+async function saveStores(shops) {
+  let reg = { version: 1, root: ROOT, stores: [] };
+  try { reg = JSON.parse(await fs.readFile(STORES_CFG, "utf8")); } catch (e) {}
+  if (!reg.stores) reg.stores = [];
+  if (!reg.root) reg.root = ROOT;
+  for (const s of shops) {
+    let e = reg.stores.find((x) => x.shop === s.shop);
+    if (!e) { e = { shop: s.shop, profile: s.profile, enabled: true }; reg.stores.push(e); }
+    else { e.profile = s.profile; if (e.enabled === undefined) e.enabled = true; }
+  }
+  await fs.mkdir(path.dirname(STORES_CFG), { recursive: true }).catch(() => {});
+  await fs.writeFile(STORES_CFG, JSON.stringify(reg, null, 2), "utf8");
+}
+
 if (DOCTOR) {
   const rs = [];
   for (let i = 0; i < stores.length; i++) {
@@ -192,6 +248,7 @@ const report = {
     total: c.result && c.result.total,
     shot: c.result && c.result.shot,
     error: c.result && c.result.error,
+    needs: c.result && c.result.needs,
     wallSec: c.wallSec,
   })),
 };
@@ -201,3 +258,10 @@ for (const s of report.stores) lines.push([s.shop.padEnd(10), s.status.padEnd(9)
 await fs.writeFile(RUN_DIR + "/summary.txt", lines.join("\n"), "utf8");
 console.log("\n" + lines.join("\n"));
 console.log("REPORT=" + RUN_DIR + "/report.json");
+
+const needs = report.stores.filter((s) => s.needs);
+if (needs.length) {
+  console.log("\nNEEDS=needs_user_action");
+  for (const s of needs) console.log(s.shop + " [" + s.needs.code + "] " + s.needs.question);
+  process.exit(4);
+}

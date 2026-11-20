@@ -47,6 +47,9 @@ node run.mjs doctor.json   # {"doctor":true,"from":"2026-10-01","to":"2026-10-31
 | 截图与文件命名混乱 | 整月/区间/老月份混用 | 统一规则：整月 `<店铺>-推广-<M>月.png`；区间 `<店铺>-推广-<M月D日-M月D日>.png`；期间目录 `YYYY-MM` / `from_to` |
 | 月账单 tab 点击无反应 | “月账单”文本可能出现多处（标题/标签） | 取第一个可见精确文本点；等 800ms 后再读表（`switchMonthlyTab()`） |
 | 2025-09 曾报 0.00 | 总览超 180 天无数据 | 实测月账单 2025/09 = 3,379.03，与余额恒等式自洽；0.00 是占位 |
+| 首次运行报“没有店铺清单” | 旧版本要求手填 `_stores.json` | 0.3.0 起自动扫描 ego profiles 生成（`STORES_DISCOVERED`）；仍找不到才提示登录 |
+| 根目录不存在直接失败 | 旧版本要求 `autoCreateRoot` | 0.3.0 起非 C 盘自动创建（`ROOT_AUTO_CREATED`）；C 盘仍拒绝 |
+| 店铺没登录只看到 error | 旧版本错误只写日志/报告 | 0.3.0 起 worker 返回 `needs`（question + availableProfiles），runner 打印 `NEEDS=needs_user_action`，退出码 4 |
 
 ## 4. 校验怎么做
 

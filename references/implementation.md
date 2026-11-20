@@ -10,13 +10,15 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 选数据源�
 ## 调度器（run.mjs）
 
 1. 读 config（argv 必填）；解析 `root`、`ego`（配置 > `PDD_EGO_BROWSER` > `~/.local/share/ego` > PATH）、`worker`（默认同目录）。
-2. 预检：日期格式/倒挂/未来、root 存在、ego 存在、店铺来源（config `shops` 或 `<root>/_stores.json`）。
-   - 缺项 → `PREFLIGHT=needs_user_input` + issues JSON，退出码 3。
-   - `root` 在 C 盘默认拒绝（`allowC:true` 才放行）。
+2. 预检：
+   - 日期格式/倒挂/未来；`root` 在 C 盘默认拒绝（`allowC:true` 才放行）；非 C 盘缺失**自动创建**（`ROOT_AUTO_CREATED`）。
+   - ego 不可用 → `ego_not_found`，退出码 3。
+   - 店铺来源：config `shops` > `<root>/_stores.json` > **自动扫描 ego profiles 生成清单**（`STORES_DISCOVERED`）；扫描不到 → `stores_not_logged_in`。
+   - 仍有问题 → `PREFLIGHT=needs_user_input` + issues JSON，退出码 3。
    - 超出 180 天**不再拒绝**，由 worker 改走财务流水月账单。
 3. 期间目录/标签：整月 `YYYY-MM` / `<M>月`；区间 `from_to` / `<M月D日-M月D日>`。
 4. 生成 job（含 `from/to/periodDir/label/beginText/endText/shotName/root/storesConfig/resultPath`）。
-5. worker pool（`concurrency`，默认 3）；每个 job 写结果 JSON；汇总 `report.json` / `summary.txt`。
+5. worker pool（`concurrency`，默认 3）；每个 job 写结果 JSON；汇总 `report.json` / `summary.txt`；若某店返回 `needs` → 打印 `NEEDS=needs_user_action` 并以退出码 **4** 结束。
 6. `doctor:true` 时串行跑只读自检并输出 `DOCTOR_RESULT`，不写文件。
 
 ## worker（worker-promo.mjs）

@@ -1,6 +1,6 @@
 ---
 name: pdd-promo-cost
-description: 拼多多多店铺「推广花费」采集（多多招财 · 商品推广总览）。按店铺 × 期间，近 180 天打开 yingxiao.pinduoduo.com 的商品推广总览，关掉「对比时间」，截图并读取「成交花费」（= 推广总花费），再用财务流水月账单核对取精确值；更早月份直接读「财务流水 → 月账单」的「本月支出」。落到 D:\对账账单\<店铺>\<期间>\（`<店铺>-推广-<月>月.png` + `推广花费.md`），并把数值写进同目录 `账单信息.md`。Use when 用户要取/核对拼多多推广花费、营销费用、月账单里的推广支出，或要把多店推广花费汇总留档。
+description: 拼多多多店铺「推广花费」采集（多多招财 · 商品推广总览）。按店铺 × 期间，近 180 天打开 yingxiao.pinduoduo.com 的商品推广总览，关掉「对比时间」，截图并读取「成交花费」（= 推广总花费），再用财务流水月账单核对取精确值；更早月份直接读「财务流水 → 月账单」的「本月支出」。落到 <账单根目录>\<店铺>\<期间>\（`<店铺>-推广-<月>月.png` + `推广花费.md`），并把数值写进同目录 `账单信息.md`。Use when 用户要取/核对拼多多推广花费、营销费用、月账单里的推广支出，或要把多店推广花费汇总留档。
 ---
 
 # pdd-promo-cost — 拼多多推广花费采集
@@ -18,8 +18,17 @@ description: 拼多多多店铺「推广花费」采集（多多招财 · 商品
 
 - Windows + ego-browser（各店 profile 已登录）
 - Node.js
-- 账单根目录：默认 `D:/对账账单`（`root` 可改；默认拒绝 C 盘，`allowC:true` 可放行）
-- 店铺清单：`<root>/_stores.json`（可只写店铺名；也可在 config 里直接给 `shops`）
+- 账单根目录：默认 `D:/对账账单`（`root` 可改；不存在会自动创建，C 盘默认拒绝、`allowC:true` 可放行）
+- 店铺清单：`<root>/_stores.json`；**可以不给**——首次运行会自动扫描 ego profiles 生成（config 里给 `shops` 也行）
+
+## 条件不满足时（agent 怎么处理）
+
+- **根目录不存在**：非 C 盘会自动创建（输出 `ROOT_AUTO_CREATED`）；C 盘默认拒绝 → 改 `root` 或显式 `allowC:true`。
+- **没有店铺清单 / 清单为空**：自动扫描 ego 已登录店铺，生成/补齐 `<root>/_stores.json`（输出 `STORES_DISCOVERED=N`）；扫描不到 → `PREFLIGHT` 里 `stores_not_logged_in`，提示用户登录店铺。
+- **店铺未登录 / 找不到**：worker 返回 `needs`（`NEEDS=needs_user_action`，退出码 **4**），含 `question` 和 `availableProfiles`；agent 应把 `question` 转述给用户，让用户在 ego 登录该店后重跑，**不要自己改映射**。
+- **ego 不可用**：`PREFLIGHT` 里 `ego_not_found` → 提示安装 ego 或在 config 里用 `ego` 指定路径。
+- **日期不合法/未来**：`PREFLIGHT` 里 `range_invalid` / `range_reversed` / `range_in_future` → 按 issues 修正后重跑。
+- 统一原则：`needs_user_input`（退出码 3）和 `needs_user_action`（退出码 4）都是“先解决再跑”，不要盲目重试。
 
 ## 用法
 
