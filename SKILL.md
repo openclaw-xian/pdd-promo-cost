@@ -12,6 +12,7 @@ description: 拼多多多店铺「推广花费」采集（多多招财 · 商品
 > - `references/implementation.md` — 调度器 + worker 流程、数据源选择、核对、写入规则、维护指南
 > - `references/testing.md` — 实测数字、交叉核对表
 > - `references/pitfalls.md` — 用什么方法、怎么用、踩过的坑与排障对照表
+> - `references/acceptance.md` — 交付验收清单（DoD）与陌生人走查步骤
 
 ## 前置条件
 

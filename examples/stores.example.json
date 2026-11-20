@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "root": "D:/对账账单",
+  "stores": [
+    { "shop": "<店铺A>", "profile": "<profile-A>", "enabled": true },
+    { "shop": "<店铺B>", "profile": "<profile-B>", "enabled": true }
+  ]
+}

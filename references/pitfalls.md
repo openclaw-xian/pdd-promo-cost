@@ -35,7 +35,7 @@ node run.mjs doctor.json   # {"doctor":true,"from":"2026-10-01","to":"2026-10-31
 
 | 现象 | 根因 | 正确做法/落点 |
 |---|---|---|
-| 店铺被判 `shop_not_logged_in`，反复扫描 profile | 新版 mms 首页没有 `Header_header_name`，旧读取方式拿不到店铺名 | 以推广页右上角 `[class*='AccountNew_mallName']` 为准；`NavHeader_options` 可能带未读数前缀（`65 鱼越贴饰`），需去掉数字前缀。见 `readShopNameFromPage()` |
+| 店铺被判 `shop_not_logged_in`，反复扫描 profile | 新版 mms 首页没有 `Header_header_name`，旧读取方式拿不到店铺名 | 以推广页右上角 `[class*='AccountNew_mallName']` 为准；`NavHeader_options` 可能带未读数前缀（`65 店铺C`），需去掉数字前缀。见 `readShopNameFromPage()` |
 | 6~8 月金额明显偏小（2.21 / 1.24…） | 卡片是 `2.21 万`，初版没处理「万」单位，读成 2.21 | `parseMoney()` 带单位换算（万 ×10,000，亿 ×1亿）；并拿月账单精确值落盘 |
 | 直播/报表页老日期显示 0.00 | 总览只保留最近 180 天，超窗是「暂无数据」，0.00 只是占位 | 老月份走月账单；`no_data` 不写 0.00 |
 | 「报表下载工具」点不动/日期改不了 | 它从左侧菜单点会**新开标签页**（`/tools/report/download`），不是当前页跳转；且日期不支持 URL 参数，同样只给近期数据 | 要抓 popup；本 skill 老月份不依赖它，直接走月账单 |

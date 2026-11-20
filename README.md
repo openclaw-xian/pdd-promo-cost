@@ -44,6 +44,8 @@ node <skill目录>/run.mjs <config.json>
 
 店铺来源：配置 `shops`，或 `<root>/_stores.json`（可只写店铺名）。
 
+示例：`examples/promo-config.example.json`、`examples/doctor-config.example.json`、`examples/stores.example.json`；交付验收/陌生人走查见 [references/acceptance.md](references/acceptance.md)。
+
 自检（只读，不截图/不写文件）：`{ "doctor": true, "from": "...", "to": "..." }`
 
 详细规则见 [SKILL.md](SKILL.md)；页面契约/实现/测试见 [references/](references/)。

@@ -1,0 +1,9 @@
+{
+  "doctor": true,
+  "from": "2026-10-01",
+  "to": "2026-10-31",
+  "root": "D:/对账账单",
+  "shops": [
+    { "shop": "<店铺A>", "profile": "<profile-A>" }
+  ]
+}

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4 — 2026-11-20
+
+- 补齐交付件：`examples/doctor-config.example.json`、`examples/stores.example.json`、`references/acceptance.md`（交付 DoD + 陌生人走查 + 状态/退出码表）。
+- 文档里的真实店铺名已清理，示例统一为 `<店铺A/B/C>` 占位。
+- 验收：用安装 junction 路径跑 `doctor`（2026-10 店铺C）= 3,217.62、未写文件；`node --check` 通过。
+
 ## 0.2.3 — 2026-11-20
 
 - 新增 `references/pitfalls.md`：方法总览、怎么用、踩坑对照表（万/亿单位、180 天保留期、月账单列与翻页、对比时间、店铺名未读数前缀、报表下载工具 popup、页面复用、老月份收入列显示 `-` 等）。
