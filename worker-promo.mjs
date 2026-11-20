@@ -22,7 +22,7 @@ function dateUrl(d) { return d; }
 
 async function writeResult(obj) {
   const out = { ...obj, shop: JOB.shop, from: JOB.from, to: JOB.to, elapsedSec: Number(((Date.now() - t0) / 1000).toFixed(1)) };
-  if (JOB.periodDir) await fs.mkdir(PERIOD_DIR, { recursive: true }).catch(() => {});
+  if (JOB.periodDir && (obj.status === "done" || obj.status === "warn")) await fs.mkdir(PERIOD_DIR, { recursive: true }).catch(() => {});
   await fs.writeFile(RESULT_PATH, JSON.stringify(out, null, 1), "utf8").catch(() => {});
   if (JOB.logPath) await fs.writeFile(JOB.logPath, logLines.join("\n"), "utf8").catch(() => {});
   return out;

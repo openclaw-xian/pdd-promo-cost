@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-11-20
+
+- 失败 / `needs` / `doctor` 不再创建 `<店铺>/<期间>` 空目录；只有 `done` / `warn` 才落盘。
+- 清理了验收产生的测试空目录。
+- 实测：不存在的店铺 → `NEEDS` + exit 4，且不产生任何店铺目录。
+
 ## 0.3.0 — 2026-11-20
 
 - **条件不满足时自动兜底**：非 C 盘根目录缺失自动创建（`ROOT_AUTO_CREATED`）；没有店铺清单时自动扫描 ego profiles 生成 `_stores.json`（`STORES_DISCOVERED`），不再直接要求用户手填。

@@ -50,6 +50,7 @@ node run.mjs doctor.json   # {"doctor":true,"from":"2026-10-01","to":"2026-10-31
 | 首次运行报“没有店铺清单” | 旧版本要求手填 `_stores.json` | 0.3.0 起自动扫描 ego profiles 生成（`STORES_DISCOVERED`）；仍找不到才提示登录 |
 | 根目录不存在直接失败 | 旧版本要求 `autoCreateRoot` | 0.3.0 起非 C 盘自动创建（`ROOT_AUTO_CREATED`）；C 盘仍拒绝 |
 | 店铺没登录只看到 error | 旧版本错误只写日志/报告 | 0.3.0 起 worker 返回 `needs`（question + availableProfiles），runner 打印 `NEEDS=needs_user_action`，退出码 4 |
+| 失败/自检后多出空店铺目录 | 旧版 `writeResult` 无条件创建 `<店铺>/<期间>` | 0.3.1 起只有 `done` / `warn` 才创建；失败/`needs`/`doctor` 不落盘 |
 
 ## 4. 校验怎么做
 
