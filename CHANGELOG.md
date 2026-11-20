@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-11-20
+
+- 退出码细化：`needs` → 4，任一 `failed` → `FAILED=job_failed`（5）；`report.json` 增加 `overviewSpend/monthlyBill/monthlyMatched/monthlyBillStatus/source/needs`。
+- 新增 `verifyMonthly`（默认 true）：整月默认核对月账单并取精确值；设 false 可省一次页面跳转（5.3s，状态标「已关闭核对」）。
+- 月账单核对状态可观测：`ok/not_generated/not_found/no_value/disabled/skipped_partial_month`；当月未出账单标注「当月账单未生成」。
+- doctor 支持老月份：只读月账单本月支出并回显（2025-09=3,379.03，不写文件）。
+- 老月份截图改 fullPage（含店铺与目标行，1893×1649）。
+- 文档/验收同步；`node --check`、近期/老月份复测通过。
+
 ## 0.3.1 — 2026-11-20
 
 - 失败 / `needs` / `doctor` 不再创建 `<店铺>/<期间>` 空目录；只有 `done` / `warn` 才落盘。

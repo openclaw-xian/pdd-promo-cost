@@ -320,7 +320,7 @@ async function collectFromMonthlyBill(shopName) {
   log("monthly", JSON.stringify(rowInfo));
   if (!rowInfo.found) throw new Error("monthly_row_not_found:" + monthKey);
   await sleep(300);
-  const shot = await page.screenshot({ path: PERIOD_DIR + "/" + JOB.shotName });
+  const shot = await page.screenshot({ path: PERIOD_DIR + "/" + JOB.shotName, fullPage: true });
   log("shot", shot);
 
   const spend = rowInfo.spend;
@@ -362,6 +362,9 @@ async function collectFromMonthlyBill(shopName) {
     spend,
     total: spend,
     source: "monthly_bill",
+    monthlyBill: spend,
+    monthlyMatched: true,
+    monthlyBillStatus: "ok",
     monthKey,
     shot: PERIOD_DIR + "/" + JOB.shotName,
   };
@@ -411,16 +414,33 @@ async function readMonthlyRowOnly(monthKey) {
   }, monthKey);
 }
 
+function localTodayIso() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function retentionStartIso() {
+  const d = new Date(localTodayIso() + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 180);
+  return d.toISOString().slice(0, 10);
+}
+function currentMonthKey() {
+  return localTodayIso().slice(0, 7).replace("-", "/");
+}
+function billStatusText(s) {
+  return ({
+    ok: "已核对",
+    not_generated: "当月账单未生成",
+    not_found: "未找到该月账单行",
+    no_value: "月账单该行为空",
+    disabled: "已关闭核对",
+    skipped_partial_month: "非整月，不核对",
+  })[s] || s;
+}
+
 async function main() {
   const shopName = await openShopSpace();
   if (!page) page = await task.newPage();
 
-  const todayIso = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-  const retentionStart = (() => {
-    const d = new Date(todayIso + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() - 180);
-    return d.toISOString().slice(0, 10);
-  })();
+  const retentionStart = retentionStartIso();
   const fparts = JOB.from.split("-").map(Number);
   const tparts = JOB.to.split("-").map(Number);
   const monthEnd = new Date(tparts[0], tparts[1], 0).getDate();
@@ -468,14 +488,18 @@ async function main() {
   // 与财务流水月账单核对（万显示会四舍五入，差异容忍 100 元）
   const monthKey = JOB.from.slice(0, 7).replace("-", "/");
   let billSpend = null;
-  if (isWholeMonth) {
+  let monthlyBillStatus = isWholeMonth ? (JOB.verifyMonthly === false ? "disabled" : "not_generated") : "skipped_partial_month";
+  if (isWholeMonth && JOB.verifyMonthly !== false) {
     const row = await readMonthlyRowOnly(monthKey);
-    if (row && row.found) billSpend = row.spend;
-    log("monthly_check", JSON.stringify({ monthKey, overviewSpend, billSpend }));
+    if (!row || !row.found) monthlyBillStatus = monthKey === currentMonthKey() ? "not_generated" : "not_found";
+    else if (row.spend === null) monthlyBillStatus = "no_value";
+    else { billSpend = row.spend; monthlyBillStatus = "ok"; }
+    log("monthly_check", JSON.stringify({ monthKey, overviewSpend, billSpend, monthlyBillStatus }));
   }
   const diff = billSpend !== null && overviewSpend !== null ? billSpend - overviewSpend : null;
   const monthlyMatched = diff !== null ? Math.abs(diff) <= 100 : null;
   const finalSpend = billSpend !== null ? billSpend : overviewSpend;
+  const billLine = monthlyBillStatus === "ok" ? fmt(billSpend) : "未核对（" + billStatusText(monthlyBillStatus) + "）";
 
   const md = [
     "# 推广花费 · " + JOB.shop + " · " + JOB.label,
@@ -486,13 +510,13 @@ async function main() {
     "| 期间 | " + JOB.from + " ~ " + JOB.to + " |",
     "| 成交花费（元） | " + fmt(finalSpend) + " |",
     "| 总览显示（元） | " + fmt(overviewSpend) + (spend.text.includes("万") ? "（页面按万四舍五入）" : "") + " |",
-    "| 月账单本月支出（元） | " + fmt(billSpend) + " |",
-    "| 与月账单核对 | " + (monthlyMatched === null ? "未核对" : monthlyMatched ? "一致（差 " + fmt(Math.abs(diff)) + " 元）" : "不一致（差 " + fmt(Math.abs(diff)) + " 元）") + " |",
+    "| 月账单本月支出（元） | " + billLine + " |",
+    "| 与月账单核对 | " + (monthlyMatched === null ? "未核对（" + billStatusText(monthlyBillStatus) + "）" : monthlyMatched ? "一致（差 " + fmt(Math.abs(diff)) + " 元）" : "不一致（差 " + fmt(Math.abs(diff)) + " 元）") + " |",
     "| 截图 | `" + JOB.shotName + "` |",
     "| 来源 | " + url + " |",
     "| 记录时间 | " + new Date().toISOString() + " |",
     "",
-    "> 口径：成交花费 = 推广总花费。截图前已关闭「对比时间」；最终数值以财务流水月账单「本月支出」为准，总览按万显示会有几十元四舍五入。",
+    "> 口径：成交花费 = 推广总花费。截图前已关闭「对比时间」；月账单核对成功时最终数值取「本月支出」，总览按万显示会有几十元四舍五入。",
   ].join("\n");
   await fs.writeFile(periodDir + "/推广花费.md", md, "utf8");
 
@@ -504,7 +528,7 @@ async function main() {
     "|---|---|",
     "| 成交花费（元） | " + fmt(finalSpend) + " |",
     "| 总览显示（元） | " + fmt(overviewSpend) + " |",
-    "| 月账单核对 | " + (monthlyMatched === null ? "未核对" : monthlyMatched ? "一致" : "不一致（差 " + fmt(Math.abs(diff)) + " 元）") + " |",
+    "| 月账单核对 | " + (monthlyMatched === null ? "未核对（" + billStatusText(monthlyBillStatus) + "）" : monthlyMatched ? "一致" : "不一致（差 " + fmt(Math.abs(diff)) + " 元）") + " |",
     "| 截图 | `" + JOB.shotName + "` |",
     "| 采集时间 | " + new Date().toISOString() + " |",
     "<!-- promo:end -->",
@@ -518,6 +542,8 @@ async function main() {
     overviewSpend,
     monthlyBill: billSpend,
     monthlyMatched,
+    monthlyBillStatus,
+    verifyMonthly: JOB.verifyMonthly !== false,
     total: spend.total,
     shot: periodDir + "/" + JOB.shotName,
     dateText,
@@ -527,13 +553,37 @@ async function main() {
 async function doctor() {
   const shopName = await openShopSpace();
   if (!page) page = await task.newPage();
+  const retentionStart = retentionStartIso();
+  const fparts = JOB.from.split("-").map(Number);
+  const tparts = JOB.to.split("-").map(Number);
+  const monthEnd = new Date(tparts[0], tparts[1], 0).getDate();
+  const isWholeMonth = fparts[1] === tparts[1] && fparts[2] === 1 && tparts[2] === monthEnd;
+  const monthKey = JOB.from.slice(0, 7).replace("-", "/");
+
+  if (JOB.from < retentionStart) {
+    if (!isWholeMonth) return { status: "doctor_no_data", shop: shopName, note: "老区间非整月，月账单无法对应" };
+    const row = await readMonthlyRowOnly(monthKey);
+    if (row && row.found && row.spend !== null) {
+      return { status: "doctor_ok", shop: shopName, source: "monthly_bill", spend: row.spend, total: row.spend, monthlyBillStatus: "ok" };
+    }
+    return { status: "doctor_no_data", shop: shopName, note: "月账单未找到该月行" };
+  }
+
   const url = "https://yingxiao.pinduoduo.com/goods/report/promotion/overView?beginDate=" + JOB.from + "&endDate=" + JOB.to;
   await page.goto(url, { timeout: 60000 });
   await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
   await page.waitForFunction(() => (document.body.innerText || "").includes("商品推广总览"), undefined, { timeout: 20000 }).catch(() => {});
   await waitDates();
   const noData = await page.evaluate(() => (document.body.innerText || "").includes("暂无数据"));
-  if (noData) return { status: "doctor_no_data", shop: shopName, note: "平台显示暂无数据（可能超出180天保留期）" };
+  if (noData) {
+    if (isWholeMonth) {
+      const row = await readMonthlyRowOnly(monthKey);
+      if (row && row.found && row.spend !== null) {
+        return { status: "doctor_ok", shop: shopName, source: "monthly_bill", spend: row.spend, total: row.spend, monthlyBillStatus: "ok" };
+      }
+    }
+    return { status: "doctor_no_data", shop: shopName, note: "平台显示暂无数据（可能超出180天保留期）" };
+  }
   await uncheckCompare();
   const spend = await readSpend();
   return { status: "doctor_ok", shop: shopName, spend: spend.spend, total: spend.total, text: spend.text.slice(0, 120) };

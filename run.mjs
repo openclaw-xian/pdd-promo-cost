@@ -148,6 +148,7 @@ function mkJob(store, i, mode) {
     shotName: store.shop + "-推广-" + label + ".png",
     resultPath: RESULT_DIR + "/" + store.shop + ".json",
     logPath: LOG_DIR + "/" + store.shop + ".log",
+    verifyMonthly: CFG.verifyMonthly !== false,
     mode: mode || "run",
   };
 }
@@ -245,6 +246,11 @@ const report = {
     status: (c.result && c.result.status) || "failed",
     ok: !!(c.result && c.result.ok),
     spend: c.result && c.result.spend,
+    overviewSpend: c.result && c.result.overviewSpend,
+    monthlyBill: c.result && c.result.monthlyBill,
+    monthlyMatched: c.result && c.result.monthlyMatched,
+    monthlyBillStatus: c.result && c.result.monthlyBillStatus,
+    source: c.result && c.result.source,
     total: c.result && c.result.total,
     shot: c.result && c.result.shot,
     error: c.result && c.result.error,
@@ -264,4 +270,8 @@ if (needs.length) {
   console.log("\nNEEDS=needs_user_action");
   for (const s of needs) console.log(s.shop + " [" + s.needs.code + "] " + s.needs.question);
   process.exit(4);
+}
+if (report.stores.some((s) => s.status === "failed")) {
+  console.log("\nFAILED=job_failed");
+  process.exit(5);
 }

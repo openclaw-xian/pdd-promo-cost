@@ -53,15 +53,21 @@
 | `STORES_DISCOVERED=N -> ...` | 没有店铺清单，自动扫描 ego 生成 | 无需处理，继续 |
 | `PREFLIGHT=needs_user_input`（exit 3） | 日期/根目录/ego/店铺清单有问题 | 按 issues 修正后重跑；不盲目重试 |
 | `NEEDS=needs_user_action`（exit 4） | 店铺未登录/找不到 | 把 `question` 转给用户登录后重跑 |
+| `FAILED=job_failed`（exit 5） | 有任务失败（非 needs） | 查 `_runs/.../logs`，修后重跑 |
 | `status=done` | 采集成功 | 可验收 |
-| `status=warn` | 读不到数值，或总览与月账单差 >100 元 | 查 `_runs/.../logs`，人工核对 |
+| `status=warn` | 读不到数值，或总览与月账单差 >100 元 | 查 `_runs/.../logs`，人工核对；report 里看 `monthlyBillStatus` |
 | `status=no_data` | 总览暂无数据且无法回退月账单（非整月） | 改成整月或换期间 |
 | `status=unsupported_old_range` | 超 180 天的区间非整月 | 只支持整月 |
 | `shop_not_logged_in` | profile 未登录或找不到 | 让用户登录对应店铺 |
-| `doctor_ok` / `doctor_no_data` | 自检结果 | `no_data` 通常是老月份/超窗口 |
+| `doctor_ok` / `doctor_no_data` | 自检结果 | 老月份现在也能 doctor（读月账单本月支出） |
 
 ## 4. 最近验收记录
 
+- **0.4.0（2026-11-20）**：
+  - `verifyMonthly` 默认核对，final spend 取月账单；`verifyMonthly:false` 时 5.3s 完成、状态标「已关闭核对」。
+  - report 增加 `overviewSpend/monthlyBill/monthlyMatched/monthlyBillStatus`；失败 exit 5。
+  - 老月份截图改 fullPage（含店铺与目标行）；doctor 老月份返回 `doctor_ok` + `source=monthly_bill`（2025-09=3,379.03，不写文件）。
+  - `node --check` 通过；近 180 天与老月份重跑数值不变。
 - **0.3.0（2026-11-20）**：
   - 自动建根目录 + 自动发现店铺：临时 root `D:/_pdd-promo-accept`、不写 `shops` → `ROOT_AUTO_CREATED` / `STORES_DISCOVERED=3`，随后 3 店 2026-10 全部 done（3,217.62 / 9,243.71 / 2,570.64）。
   - 未登录店铺：`不存在店X` → `NEEDS=needs_user_action`，含 `question` 与可用 profiles，退出码 **4**。
