@@ -63,6 +63,9 @@
 
 ## 4. 最近验收记录
 
+- **0.4.1（2026-11-20）**：
+  - 稳定性：日期回读硬校验（失败重试 1 次）、月账单行重试 1 次、店铺发现重试 1 次。
+  - 3 店 2026-10 连续跑 2 次数值一致（3,217.62 / 9,243.71 / 2,570.64）；老月份 2025-09 = 3,379.03 复测一致。
 - **0.4.0（2026-11-20）**：
   - `verifyMonthly` 默认核对，final spend 取月账单；`verifyMonthly:false` 时 5.3s 完成、状态标「已关闭核对」。
   - report 增加 `overviewSpend/monthlyBill/monthlyMatched/monthlyBillStatus`；失败 exit 5。

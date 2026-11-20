@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-11-20
+
+- 稳定性加固：日期回读不一致不再静默继续，自动重试 1 次后抛 `date_not_applied`（避免读错月份）。
+- 月账单行找不到自动重试 1 次；店铺自动发现空结果自动重试 1 次。
+- 稳定性实测：3 店 2026-10 连续跑 2 次数值完全一致（3,217.62 / 9,243.71 / 2,570.64）；老月份 2025-09 复测 3,379.03。
+
 ## 0.4.0 — 2026-11-20
 
 - 退出码细化：`needs` → 4，任一 `failed` → `FAILED=job_failed`（5）；`report.json` 增加 `overviewSpend/monthlyBill/monthlyMatched/monthlyBillStatus/source/needs`。

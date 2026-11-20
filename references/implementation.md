@@ -13,7 +13,7 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 选数据源�
 2. 预检：
    - 日期格式/倒挂/未来；`root` 在 C 盘默认拒绝（`allowC:true` 才放行）；非 C 盘缺失**自动创建**（`ROOT_AUTO_CREATED`）。
    - ego 不可用 → `ego_not_found`，退出码 3。
-   - 店铺来源：config `shops` > `<root>/_stores.json` > **自动扫描 ego profiles 生成清单**（`STORES_DISCOVERED`）；扫描不到 → `stores_not_logged_in`。
+   - 店铺来源：config `shops` > `<root>/_stores.json` > **自动扫描 ego profiles 生成清单**（`STORES_DISCOVERED`，空结果自动重试一次）；扫描不到 → `stores_not_logged_in`。
    - 仍有问题 → `PREFLIGHT=needs_user_input` + issues JSON，退出码 3。
    - 超出 180 天**不再拒绝**，由 worker 改走财务流水月账单。
 3. 期间目录/标签：整月 `YYYY-MM` / `<M>月`；区间 `from_to` / `<M月D日-M月D日>`。
@@ -30,7 +30,7 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 选数据源�
    - 仍找不到 → `shop_not_logged_in`（提示用户登录，不是改映射）。
 2. **日期 / 数据源选择**：
    - `from < 今天−180天`（老月份）→ 直接走「财务流水 → 月账单」，读该月 `本月支出`；只支持整月。
-   - 否则用总览页 URL 参数 `beginDate/endDate`；`waitDates()` 回读校验。
+   - 否则用总览页 URL 参数 `beginDate/endDate`；`waitDates()` 回读校验，**不一致重试一次，二次仍不一致抛 `date_not_applied`**（不继续读数）。
    - 总览页出现「暂无数据」→ 若整月则自动回退月账单，否则返回 `no_data`。
 3. **月账单模式**（`collectFromMonthlyBill`）：
    - 打开 `/mains/account/report` → 点「月账单」→ 滚动/翻页找到 `YYYY/MM` 行；
@@ -38,7 +38,7 @@ worker-promo.mjs 运行在 ego 进程内：解析空间/找店 → 选数据源�
    - 写 `推广花费.md`（来源标注月账单）和 `账单信息.md` 块。
 4. **关对比**：两个 `anq-checkbox-input`，第 2 个为「对比时间」；勾选则点掉；复核指标卡不含 `%`，必要时再点一次。
 5. **读数（总览）**：`readSpend()` 只扫长度为 <90 的卡片 div，分别解析「成交花费」「总花费」的第一个数值；`parseMoney()` 处理 `万/亿` 单位换算（例 `2.21 万` = 22,100）；读不到返回 null（状态 `warn`）。
-6. **月账单核对**（`verifyMonthly`，默认 true）：整月采集完总览后，用 `readMonthlyRowOnly()` 读同月月账单「本月支出」；最终 `spend` 取月账单精确值，`overviewSpend` 保留页面显示值，差异 ≤100 元视为一致（万显示四舍五入），否则状态 `warn`；并记录 `monthlyBillStatus`（`ok/not_generated/not_found/no_value/disabled/skipped_partial_month`）。
+6. **月账单核对**（`verifyMonthly`，默认 true）：整月采集完总览后，用 `readMonthlyRowOnly()` 读同月月账单「本月支出」；**行没找到会自动重试一次**；最终 `spend` 取月账单精确值，`overviewSpend` 保留页面显示值，差异 ≤100 元视为一致（万显示四舍五入），否则状态 `warn`；并记录 `monthlyBillStatus`（`ok/not_generated/not_found/no_value/disabled/skipped_partial_month`）。
 7. **截图**：`page.screenshot` 到 `<periodDir>/<shotName>`（截图在核对前完成，是总览页）。
 8. **写文件**：
    - `推广花费.md`（店铺/期间/成交花费（月账单精确值）/总览显示/月账单本月支出与核对状态/截图/来源 URL/时间 + 口径说明）

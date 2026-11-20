@@ -149,12 +149,24 @@ async function openShopSpace() {
 }
 
 async function waitDates() {
-  await page.waitForFunction(({ begin, end }) => {
-    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const ins = [...document.querySelectorAll("input")].filter((e) => vis(e) && (e.placeholder || "").includes("开始日期"));
-    if (!ins.length) return false;
-    return ins.some((e) => e.value === begin) && [...document.querySelectorAll("input")].some((e) => (e.placeholder || "").includes("结束日期") && e.value === end);
-  }, { begin: JOB.beginText, end: JOB.endText }, { timeout: 15000 }).catch(() => {});
+  let ok = false;
+  try {
+    await page.waitForFunction(({ begin, end }) => {
+      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const ins = [...document.querySelectorAll("input")].filter((e) => vis(e) && (e.placeholder || "").includes("开始日期"));
+      if (!ins.length) return false;
+      return ins.some((e) => e.value === begin) && [...document.querySelectorAll("input")].some((e) => (e.placeholder || "").includes("结束日期") && e.value === end);
+    }, { begin: JOB.beginText, end: JOB.endText }, { timeout: 15000 });
+    ok = true;
+  } catch (e) {}
+  if (!ok) {
+    const actual = await page.evaluate(() => {
+      const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const ins = [...document.querySelectorAll("input")].filter((e) => vis(e) && ((e.placeholder || "").includes("开始日期") || (e.placeholder || "").includes("结束日期")));
+      return ins.map((e) => ({ ph: e.placeholder || "", v: e.value || "" }));
+    }).catch(() => []);
+    throw new Error("date_not_applied: expect " + JOB.beginText + " ~ " + JOB.endText + ", actual=" + JSON.stringify(actual));
+  }
   await sleep(300);
 }
 
@@ -371,7 +383,7 @@ async function collectFromMonthlyBill(shopName) {
 }
 
 // 只读月账单某行，返回 {found, spend, raw}（用于总览值与账本核对）
-async function readMonthlyRowOnly(monthKey) {
+async function readMonthlyRowOnly(monthKey, attempt = 1) {
   await page.goto(FIN_URL, { timeout: 60000 });
   await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
   await page.waitForFunction(() => (document.body.innerText || "").includes("财务流水"), undefined, { timeout: 20000 }).catch(() => {});
@@ -401,7 +413,7 @@ async function readMonthlyRowOnly(monthKey) {
     await sleep(700);
     await page.evaluate(() => window.scrollTo(0, 0));
   }
-  return await page.evaluate((k) => {
+  const rowInfo = await page.evaluate((k) => {
     const txt = (e) => (e ? (e.innerText || "").replace(/\s+/g, " ").trim() : "");
     const rows = [...document.querySelectorAll("table tr")];
     const row = rows.find((r) => r.cells[0] && txt(r.cells[0]) === k);
@@ -412,6 +424,12 @@ async function readMonthlyRowOnly(monthKey) {
     const num = parseFloat(raw.replace(/,/g, "").replace(/[^\d.-]/g, ""));
     return { found: true, cells, raw, spend: Number.isFinite(num) ? num : null };
   }, monthKey);
+  if (!rowInfo.found && attempt < 2) {
+    log("monthly_row_retry", monthKey + " attempt=" + attempt);
+    await sleep(800);
+    return await readMonthlyRowOnly(monthKey, attempt + 1);
+  }
+  return rowInfo;
 }
 
 function localTodayIso() {
@@ -455,10 +473,20 @@ async function main() {
   }
 
   const url = "https://yingxiao.pinduoduo.com/goods/report/promotion/overView?beginDate=" + dateUrl(JOB.from) + "&endDate=" + dateUrl(JOB.to);
-  await page.goto(url, { timeout: 60000 });
-  await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
-  await page.waitForFunction(() => (document.body.innerText || "").includes("商品推广总览"), undefined, { timeout: 20000 }).catch(() => {});
-  await waitDates();
+  let datesOk = false;
+  for (let attempt = 1; attempt <= 2 && !datesOk; attempt++) {
+    await page.goto(url, { timeout: 60000 });
+    await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
+    await page.waitForFunction(() => (document.body.innerText || "").includes("商品推广总览"), undefined, { timeout: 20000 }).catch(() => {});
+    try {
+      await waitDates();
+      datesOk = true;
+    } catch (e) {
+      log("date_check_failed", "attempt=" + attempt + " " + String((e && e.message) || e));
+      if (attempt === 2) throw e;
+      await sleep(800);
+    }
+  }
   log("page", url);
 
   const noData = await page.evaluate(() => (document.body.innerText || "").includes("暂无数据"));

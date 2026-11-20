@@ -83,7 +83,7 @@ node <skill目录>/run.mjs <config.json>
 - 采集时会顺手核对同月「财务流水 → 月账单」的**本月支出**：最终数值以月账单精确值为准，总览按万显示会有几十元四舍五入，差异 ≤100 元视为一致。
 - **近 180 天用「商品推广总览」**；更早月份改用「财务流水 → 月账单」的 **本月支出**（同口径，月账单可翻页查到 2024/01 甚至更早）。总览页超过 180 天会显示「暂无数据」，0.00 是占位，不是真实花费。
 - 截图前**关闭「对比时间」**（否则卡片会多出环比值和百分比，容易读错）。
-- 日期用 URL 参数 `beginDate/endDate` 设置（页面输入框会回读校验）；格式 `YYYY/MM/DD`。
+- 日期用 URL 参数 `beginDate/endDate` 设置（页面输入框会回读校验）；格式 `YYYY/MM/DD`。**回读不一致会直接失败 `date_not_applied`（自动重试一次），绝不带着错日期读数**。
 - 店铺名从页面右上角 `AccountNew_mallName` 读取并校验，不匹配会报错，不会串店。
 - 采集结果包含 `spend`（最终）、`overviewSpend`、`monthlyBill`、`monthlyMatched`；读不到时状态 `warn`，不会假报成功。
 - 超出 180 天的老月份：自动走月账单；老区间（跨月/非整月）仅支持整月，否则返回 `unsupported_old_range`。
@@ -103,6 +103,7 @@ node <skill目录>/run.mjs <config.json>
 | `shop_not_logged_in` | ego 里没找到该店 profile；确认登录后重跑（worker 会自动扫描 profiles） |
 | `spend_not_found` | 页面改版或对比未关闭；看 `_runs/.../logs/<店>.log`，按 references 调整解析 |
 | 日期不对 | URL 参数被忽略时，改用 anq 日期控件（结构见 dom-contract） |
+| `date_not_applied` | 页面没把日期应用成功（会重试一次后失败）；检查是否登录失效/页面改版；不会带错日期继续 |
 | 页面停在登录页 | 手动登录该 profile 后重跑 |
 
 更完整的「现象 → 根因 → 修法」见 `references/pitfalls.md`（含万单位、180 天、月账单翻页、对比开关等坑）。

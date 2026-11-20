@@ -99,7 +99,12 @@ if (CFG.shops && CFG.shops.length) {
 // 没有可跑店铺时，自动扫描 ego 已登录店铺并生成清单（用户/agent 不用手填映射）
 if (!stores.length && !storesFromConfig && egoUsable && !issues.some((i) => i.code === "ego_not_found")) {
   console.log("STORES_DISCOVERING=1");
-  const disc = await runDiscovery();
+  let disc = await runDiscovery();
+  if (!(disc && disc.ok && disc.shops && disc.shops.length)) {
+    console.log("STORES_DISCOVERY_RETRY");
+    await sleep(1500);
+    disc = await runDiscovery();
+  }
   if (disc && disc.ok && disc.shops && disc.shops.length) {
     await saveStores(disc.shops);
     stores = disc.shops.map((s) => ({ shop: s.shop, profile: s.profile }));
